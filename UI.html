@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head><meta charset="UTF-8"><title>Custom Base MR Pair Remover</title></head>
+<body>
+    <h2>Hệ thống quét Miller-Rabin (Tự động xóa cặp bị chọc thủng)</h2>
+    
+    <div>
+        <label>Nhập các cơ số (cách nhau bằng dấu phẩy):</label><br>
+        <input type="text" id="customBasesInput" value="997, 1009, 1013, 1019, 1021, 1031, 1033, 1039" style="width: 400px; padding: 5px;">
+    </div>
+    <br>
+    <button id="btn" onclick="startMegaScan()">Bắt đầu quét 100 Triệu số</button>
+    
+    <p id="status" style="font-weight:bold; color:blue;"></p>
+    <div id="log" style="font-family:monospace; font-size:13px; line-height:1.5;"></div>
+
+    <script>
+        function sieve(max) {
+            let p = new Uint8Array(max + 1).fill(1);
+            p[0] = p[1] = 0;
+            for (let i = 2; i * i <= max; i++) {
+                if (p[i]) { for (let j = i * i; j <= max; j += i) p[j] = 0; }
+            }
+            return p;
+        }
+
+        function powerMod(base, exp, mod) {
+            let res = 1n
+            while (exp > 0n) {
+                if (exp & 1n) res = (res * base) % mod;
+                base = (base * base) % mod; 
+                exp >>= 1n;
+            }
+            return res;
+        }
+
+        function checkMR(nBig, aBig) {
+            let d = nBig - 1n; let s = 0n;
+            while ((d & 1n) === 0n) { d >>= 1n; s++; }
+            let x = powerMod(aBig, d, nBig);
+            if (x === 1n || x === nBig - 1n) return true;
+            for (let r = 0n; r < s - 1n; r++) {
+                x = (x * x) % nBig;
+                if (x === nBig - 1n) return true;
+                if (x === 1n) return false;
+            }
+            return false;
+        }
+
+        function startMegaScan() {
+            const MAX = 100000000; 
+            const CHUNK_SIZE = 300; 
+            const status = document.getElementById('status');
+            const log = document.getElementById('log');
+            const inputStr = document.getElementById('customBasesInput').value;
+            
+            document.getElementById('btn').disabled = true;
+            status.innerText = "Đang khởi tạo màng sàng hệ thống...";
+            log.innerHTML = "";
+
+            let bases = inputStr.split(',')
+                                .map(x => x.trim())
+                                .filter(x => x !== "" && !isNaN(x))
+                                .map(x => BigInt(x));
+
+            if (bases.length < 2) {
+                alert("Vui lòng nhập ít nhất 2 cơ số!");
+                document.getElementById('btn').disabled = false;
+                status.innerText = "";
+                return;
+            }
+
+            // Tạo danh sách các cặp ban đầu
+            let activePairs = [];
+            for(let i = 0; i < bases.length; i++) {
+                for(let j = i + 1; j < bases.length; j++) {
+                    activePairs.push({a1: bases[i], a2: bases[j], id: `${bases[i]}-${bases[j]}`});
+                }
+            }
+
+            log.innerHTML = `⚙️ <b>Khởi tạo thành công:</b> ${activePairs.length} cặp cấu hình.<br><br>`;
+
+            setTimeout(() => {
+                const isPrime = sieve(MAX);
+                
+                let maxBase = 0;
+                for(let b of bases) { if(Number(b) > maxBase) maxBase = Number(b); }
+                let currentN = 2045 + 2; 
+
+                function scanChunk() {
+                    // TỐI ƯU CHI PHÍ: Nếu không còn cặp nào sống sót, dừng quét ngay lập tức!
+                    if (activePairs.length === 0) {
+                        status.innerText = "THỐNG KÊ KẾT QUẢ CUỐI CÙNG:";
+                        log.innerHTML += `❌ <b>Tất cả các cặp đã bị tiêu diệt hoàn toàn! Thuật toán tự động ngắt sớm để tiết kiệm CPU.</b><br>`;
+                        document.getElementById('btn').disabled = false;
+                        return;
+                    }
+
+                    let endN = Math.min(currentN + CHUNK_SIZE, MAX);
+                    status.innerText = `Đang quét dải số: ${currentN.toLocaleString()} ➔ ${endN.toLocaleString()}... (Còn ${activePairs.length} cặp đang sống)`;
+
+                    let loopStart = currentN | 1; 
+                    
+                    for (let n = loopStart; n <= endN; n += 2) {
+                        if (isPrime[n] === 0) { 
+                            let nBig = BigInt(n);
+                            let hasBrokenAny = false;
+
+                            // Quét qua danh sách các cặp đang sống
+                            for (let i = 0; i < activePairs.length; i++) {
+                                let pair = activePairs[i];
+                                
+                                // Nếu số n lừa được cả 2 cơ số trong cặp này
+                                if (checkMR(nBig, pair.a1) && checkMR(nBig, pair.a2)) {
+                                    log.innerHTML += `💥 Cặp {${pair.a1}n, ${pair.a2}n} bị chọc thủng bởi: <b>${n.toLocaleString()}</b><br>`;
+                                    pair.broken = true; // Đánh dấu để lát nữa lọc xóa
+                                    hasBrokenAny = true;
+                                }
+                            }
+
+                            // Nếu có cặp bị chọc thủng, thực hiện lọc loại bỏ ngay lập tức
+                            if (hasBrokenAny) {
+                                activePairs = activePairs.filter(p => !p.broken);
+                                // Nếu trong lúc quét giữa chừng mà mảng trống trơn thì bẻ gãy vòng lặp n luôn
+                                if (activePairs.length === 0) break;
+                            }
+                        }
+                    }
+
+                    currentN += CHUNK_SIZE;
+                    if (currentN <= MAX) {
+                        setTimeout(scanChunk, 5);
+                    } else {
+                        status.innerText = "THỐNG KÊ KẾT QUẢ CUỐI CÙNG:";
+                        log.innerHTML += `<br>====================================<br>`;
+                        if(activePairs.length > 0) {
+                            log.innerHTML += `🎉 TÌM THẤY CÁC CẶP BẤT TỬ ĐẾN 100 TRIỆU: <br><span style="color:green; font-size:16px;"><b>${activePairs.map(p => `{${p.a1}n, ${p.a2}n}`).join(', ')}</b></span>`;
+                        } else {
+                            log.innerHTML += `❌ Thất bại! Không có cặp nào sống sót qua dải 100 triệu.`;
+                        }
+                        document.getElementById('btn').disabled = false;
+                    }
+                }
+
+                scanChunk();
+            }, 50);
+        }
+    </script>
+</body>
+</html>
